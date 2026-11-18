@@ -52,6 +52,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -90,7 +91,7 @@ private enum class LauncherPage { HOME, APPS, WIDGETS, SETTINGS }
 
 class MainActivity : ComponentActivity() {
     private lateinit var widgetHost: AppWidgetHost
-    private val widgetIds = mutableListOf<Int>()
+    private val widgetIds = mutableStateListOf<Int>()
     private val widgetPrefs by lazy { getSharedPreferences("launcher_widgets", Context.MODE_PRIVATE) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -113,7 +114,7 @@ class MainActivity : ComponentActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != 0x4D41) return
         val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
-        if (resultCode == RESULT_OK && id >= 0 && widgetHost.appWidgetManager.getAppWidgetInfo(id) != null) {
+        if (resultCode == RESULT_OK && id >= 0 && widgetHost.getAppWidgetInfo(id) != null) {
             if (!widgetIds.contains(id)) widgetIds.add(id); persistWidgets()
         } else if (id >= 0) widgetHost.deleteAppWidgetId(id)
     }
