@@ -12,3 +12,6 @@ Android launcher built with Kotlin and Jetpack Compose.
 Run `gradle assembleDebug` with Gradle 8.9 and Android SDK installed.
 
 The APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
+
+## Build status
+The Stage 1 project skeleton and initial Compose launcher screen are committed.
