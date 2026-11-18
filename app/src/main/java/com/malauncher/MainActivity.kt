@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -93,6 +94,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var widgetHost: AppWidgetHost
     private val widgetIds = mutableStateListOf<Int>()
     private val widgetPrefs by lazy { getSharedPreferences("launcher_widgets", Context.MODE_PRIVATE) }
+    private var pendingWidgetId: Int = -1
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         widgetHost = AppWidgetHost(this, 0x4D41)
@@ -106,6 +108,7 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     private fun addWidget() {
         val id = widgetHost.allocateAppWidgetId()
+        pendingWidgetId = id
         val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_PICK).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
         startActivityForResult(intent, 0x4D41)
     }
@@ -113,8 +116,9 @@ class MainActivity : ComponentActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != 0x4D41) return
-        val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
-        if (resultCode == RESULT_OK && id >= 0 && widgetHost.getAppWidgetInfo(id) != null) {
+        val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId) ?: pendingWidgetId
+        pendingWidgetId = -1
+        if (resultCode == RESULT_OK && id >= 0 && AppWidgetManager.getInstance(this).getAppWidgetInfo(id) != null) {
             if (!widgetIds.contains(id)) widgetIds.add(id); persistWidgets()
         } else if (id >= 0) widgetHost.deleteAppWidgetId(id)
     }
