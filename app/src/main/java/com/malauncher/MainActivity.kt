@@ -395,17 +395,18 @@ private fun BottomBar(
     current: LauncherPage, accent: Color, onHome: () -> Unit, onApps: () -> Unit,
     onWidgets: () -> Unit, onSettings: () -> Unit
 ) {
-    Row(
-        Modifier.fillMaxWidth().align(Alignment.BottomCenter)
-            .padding(start = 20.dp, end = 20.dp, bottom = 22.dp)
-            .clip(RoundedCornerShape(26.dp)).background(Color(0xE6152032)).padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        BottomItem(Icons.Rounded.Home, "Главная", current == LauncherPage.HOME, accent, onHome)
-        BottomItem(Icons.Rounded.Apps, "Приложения", current == LauncherPage.APPS, accent, onApps)
-        BottomItem(Icons.Rounded.Widgets, "Виджеты", current == LauncherPage.WIDGETS, accent, onWidgets)
-        BottomItem(Icons.Rounded.Settings, "Настройки", false, accent, onSettings)
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 22.dp)
+                .clip(RoundedCornerShape(26.dp)).background(Color(0xE6152032)).padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BottomItem(Icons.Rounded.Home, "Главная", current == LauncherPage.HOME, accent, onHome)
+            BottomItem(Icons.Rounded.Apps, "Приложения", current == LauncherPage.APPS, accent, onApps)
+            BottomItem(Icons.Rounded.Widgets, "Виджеты", current == LauncherPage.WIDGETS, accent, onWidgets)
+            BottomItem(Icons.Rounded.Settings, "Настройки", false, accent, onSettings)
+        }
     }
 }
 
