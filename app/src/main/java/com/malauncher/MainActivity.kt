@@ -1,5 +1,7 @@
 package com.malauncher
 
+import android.appwidget.AppWidgetHost
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -60,6 +62,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -86,14 +89,39 @@ private val AccentPalette = listOf(
 private enum class LauncherPage { HOME, APPS, WIDGETS, SETTINGS }
 
 class MainActivity : ComponentActivity() {
+    private lateinit var widgetHost: AppWidgetHost
+    private val widgetIds = mutableListOf<Int>()
+    private val widgetPrefs by lazy { getSharedPreferences("launcher_widgets", Context.MODE_PRIVATE) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { LauncherRoot() } }
+        widgetHost = AppWidgetHost(this, 0x4D41)
+        widgetIds.addAll(widgetPrefs.getString("ids", "").orEmpty().split(",").mapNotNull { it.toIntOrNull() })
+        setContent { MaterialTheme { LauncherRoot(widgetHost, widgetIds.toList(), { addWidget() }, { id ->
+            widgetHost.deleteAppWidgetId(id); widgetIds.remove(id); persistWidgets()
+        }) } }
     }
+    override fun onStart() { super.onStart(); runCatching { widgetHost.startListening() } }
+    override fun onStop() { runCatching { widgetHost.stopListening() }; super.onStop() }
+    @Suppress("DEPRECATION")
+    private fun addWidget() {
+        val id = widgetHost.allocateAppWidgetId()
+        val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_PICK).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+        startActivityForResult(intent, 0x4D41)
+    }
+    @Deprecated("Deprecated by Android; retained for widget picker compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 0x4D41) return
+        val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1) ?: -1
+        if (resultCode == RESULT_OK && id >= 0 && widgetHost.appWidgetManager.getAppWidgetInfo(id) != null) {
+            if (!widgetIds.contains(id)) widgetIds.add(id); persistWidgets()
+        } else if (id >= 0) widgetHost.deleteAppWidgetId(id)
+    }
+    private fun persistWidgets() { widgetPrefs.edit().putString("ids", widgetIds.joinToString(",")).apply() }
 }
 
 @Composable
-private fun LauncherRoot() {
+private fun LauncherRoot(widgetHost: AppWidgetHost, widgetIds: List<Int>, onAddWidget: () -> Unit, onRemoveWidget: (Int) -> Unit) {
     val context = LocalContext.current
     val repository = remember { AppRepository(context) }
     var apps by remember { mutableStateOf(repository.loadApps()) }
@@ -126,7 +154,7 @@ private fun LauncherRoot() {
                     onBack = { page = LauncherPage.HOME; search = ""; category = null },
                     onLaunch = { launch(context, it) }
                 )
-                LauncherPage.WIDGETS -> WidgetsPage(onBack = { page = LauncherPage.HOME })
+                LauncherPage.WIDGETS -> WidgetsPage(widgetHost, widgetIds, onAddWidget, onRemoveWidget) { page = LauncherPage.HOME }
                 LauncherPage.SETTINGS -> SettingsPage(
                     accentIndex = accentIndex, columns = columns, iconSize = iconSize,
                     clockSize = clockSize, labels = labels,
@@ -314,20 +342,38 @@ private fun AppIcon(app: LauncherApp, accent: Color, size: Int, showLabel: Boole
 }
 
 @Composable
-private fun WidgetsPage(onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(start = 22.dp, end = 22.dp, top = 30.dp, bottom = 100.dp)) {
+private fun WidgetsPage(widgetHost: AppWidgetHost, widgetIds: List<Int>, onAddWidget: () -> Unit, onRemoveWidget: (Int) -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val manager = remember { AppWidgetManager.getInstance(context) }
+    Column(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 100.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, null, tint = Ink) }
             Text("Виджеты", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onAddWidget) { Text("＋ Добавить", color = AccentPalette[0]) }
         }
-        Spacer(Modifier.height(20.dp))
-        FeatureCard("Android-виджеты", "Размещение, изменение размера и стеки виджетов приложений.", Icons.Rounded.Widgets)
-        FeatureCard("Умные виджеты", "Часы, дата, батарея, погода, фото и быстрые действия.", Icons.Rounded.CalendarMonth)
-        FeatureCard("Всплывающие виджеты", "Открытие компактного виджета поверх рабочего стола.", Icons.Rounded.Apps)
-        Text("Это раздел интерфейса. Подключение Android AppWidgetHost и интерактивных виджетов — следующий этап реализации.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 14.dp))
+        if (widgetIds.isEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            FeatureCard("Настоящие Android-виджеты", "Нажми «Добавить», выбери виджет установленного приложения и подтверди добавление.", Icons.Rounded.Widgets)
+            Text("Доступность зависит от того, предоставляет ли приложение собственный виджет.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        } else {
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(top = 12.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                items(widgetIds, key = { it }) { id ->
+                    val info = remember(id) { manager.getAppWidgetInfo(id) }
+                    if (info != null) {
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Color(0xFF172337)).padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(info.loadLabel(context.packageManager).toString(), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { onRemoveWidget(id) }) { Text("Убрать", color = Color(0xFFFF9B9B)) }
+                            }
+                            AndroidView(factory = { ctx -> widgetHost.createView(ctx, id, info).apply { setAppWidget(id, info) } }, modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            }
+        }
     }
 }
-
 @Composable
 private fun FeatureCard(title: String, description: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Row(
