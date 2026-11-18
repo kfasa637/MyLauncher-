@@ -1,17 +1,12 @@
 package com.malauncher
 
-import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
-import android.graphics.drawable.Drawable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,17 +18,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,7 +51,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -62,87 +58,109 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import com.malauncher.data.AppRepository
+import com.malauncher.data.LauncherPreferences
+import com.malauncher.model.AppCategory
+import com.malauncher.model.LauncherApp
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val MainText = Color(0xFFF7F8FC)
-private val SecondaryText = Color(0xFFADB8CC)
-private val Panel = Color(0xB817263D)
-private val AccentOptions = listOf(
-    Color(0xFF8CC8FF), Color(0xFFC5A5FF), Color(0xFF83E3C0),
-    Color(0xFFFFB58E), Color(0xFFFF8EAF)
+private val TextPrimary = Color(0xFFF7F8FC)
+private val TextSecondary = Color(0xFFADB8CC)
+private val AccentColors = listOf(
+    Color(0xFF82BFFF), Color(0xFFC3A0FF), Color(0xFF78DDBA),
+    Color(0xFFFFB58E), Color(0xFFFF83A8)
 )
-
-data class LauncherApp(val label: String, val packageName: String, val icon: Drawable)
+private val PanelColor = Color(0xA817263D)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme { LauncherRoot() } }
+        setContent { MaterialTheme { LauncherAppRoot() } }
     }
 }
 
 @Composable
-private fun LauncherRoot() {
+private fun LauncherAppRoot() {
     val context = LocalContext.current
-    val apps = remember { loadLaunchableApps(context) }
-    val prefs = remember { context.getSharedPreferences("launcher_settings", Context.MODE_PRIVATE) }
-    var drawerOpen by remember { mutableStateOf(false) }
-    var search by remember { mutableStateOf("") }
-    var editorOpen by remember { mutableStateOf(false) }
-    var accentIndex by remember { mutableStateOf(prefs.getInt("accent", 0).coerceIn(0, AccentOptions.lastIndex)) }
-    var columns by remember { mutableStateOf(prefs.getInt("columns", 4).coerceIn(3, 5)) }
-    var clockSize by remember { mutableStateOf(prefs.getInt("clockSize", 58).coerceIn(42, 76)) }
-    val accent = AccentOptions[accentIndex]
+    val apps = remember { AppRepository(context).loadApps() }
+    val preferences = remember { LauncherPreferences(context) }
 
-    Surface(
-        modifier = Modifier.fillMaxSize().pointerInput(drawerOpen) {
-            var distance = 0f
-            detectVerticalDragGestures(
-                onVerticalDrag = { _, amount -> distance += amount },
-                onDragEnd = {
-                    if (distance < -65f) drawerOpen = true
-                    if (distance > 65f) drawerOpen = false
-                    distance = 0f
-                }
+    var drawerVisible by remember { mutableStateOf(false) }
+    var settingsVisible by remember { mutableStateOf(false) }
+    var searchText by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf<AppCategory?>(null) }
+    var accentIndex by remember { mutableStateOf(preferences.accentIndex) }
+    var columns by remember { mutableStateOf(preferences.gridColumns) }
+    var iconSize by remember { mutableStateOf(preferences.iconSize) }
+    var clockSize by remember { mutableStateOf(preferences.clockSize) }
+    var showLabels by remember { mutableStateOf(preferences.showLabels) }
+    val accent = AccentColors[accentIndex]
+
+    Box(Modifier.fillMaxSize()) {
+        LauncherBackdrop()
+        if (drawerVisible) {
+            ApplicationDrawer(
+                apps = apps,
+                searchText = searchText,
+                selectedCategory = selectedCategory,
+                accent = accent,
+                onSearchChange = { searchText = it },
+                onCategoryChange = { selectedCategory = it },
+                onBack = { drawerVisible = false; searchText = ""; selectedCategory = null },
+                onLaunch = { launchApp(context, it) }
             )
-        },
-        color = Color(0xFF071329)
-    ) {
-        Box(Modifier.fillMaxSize()) {
-            WallpaperBackdrop()
-            AnimatedVisibility(visible = !drawerOpen) {
-                HomeScreen(
-                    apps = apps, accent = accent, columns = columns, clockSize = clockSize,
-                    onOpenDrawer = { drawerOpen = true },
-                    onOpenEditor = { editorOpen = true },
-                    onLaunch = { launchApp(context, it) }
-                )
-            }
-            AnimatedVisibility(visible = drawerOpen) {
-                AppDrawer(
-                    apps = apps, search = search, accent = accent,
-                    onSearchChange = { search = it },
-                    onBack = { drawerOpen = false; search = "" },
-                    onLaunch = { launchApp(context, it) }
-                )
-            }
-            if (editorOpen) {
-                EditorDialog(
-                    accentIndex = accentIndex, columns = columns, clockSize = clockSize,
-                    onAccent = { accentIndex = it; prefs.edit().putInt("accent", it).apply() },
-                    onColumns = { columns = it; prefs.edit().putInt("columns", it).apply() },
-                    onClockSize = { clockSize = it; prefs.edit().putInt("clockSize", it).apply() },
-                    onClose = { editorOpen = false }
-                )
-            }
+        } else {
+            HomePage(
+                apps = apps,
+                accent = accent,
+                columns = columns,
+                iconSize = iconSize,
+                clockSize = clockSize,
+                showLabels = showLabels,
+                onOpenDrawer = { drawerVisible = true },
+                onOpenSettings = { settingsVisible = true },
+                onLaunch = { launchApp(context, it) }
+            )
+        }
+
+        if (settingsVisible) {
+            LauncherSettingsDialog(
+                accentIndex = accentIndex,
+                columns = columns,
+                iconSize = iconSize,
+                clockSize = clockSize,
+                showLabels = showLabels,
+                onAccentChange = {
+                    accentIndex = it
+                    preferences.accentIndex = it
+                },
+                onColumnsChange = {
+                    columns = it
+                    preferences.gridColumns = it
+                },
+                onIconSizeChange = {
+                    iconSize = it
+                    preferences.iconSize = it
+                },
+                onClockSizeChange = {
+                    clockSize = it
+                    preferences.clockSize = it
+                },
+                onLabelsChange = {
+                    showLabels = it
+                    preferences.showLabels = it
+                },
+                onDismiss = { settingsVisible = false }
+            )
         }
     }
 }
 
 @Composable
-private fun WallpaperBackdrop() {
+private fun LauncherBackdrop() {
     Box(
         Modifier.fillMaxSize().background(
             Brush.linearGradient(
@@ -151,218 +169,329 @@ private fun WallpaperBackdrop() {
         )
     ) {
         Box(
-            Modifier.align(Alignment.TopEnd).size(310.dp)
+            Modifier.align(Alignment.TopEnd).size(340.dp)
                 .background(Brush.radialGradient(listOf(Color(0x553A91D8), Color.Transparent)))
         )
         Box(
-            Modifier.align(Alignment.BottomStart).size(330.dp)
+            Modifier.align(Alignment.BottomStart).size(360.dp)
                 .background(Brush.radialGradient(listOf(Color(0x443A65C8), Color.Transparent)))
         )
     }
 }
 
 @Composable
-private fun HomeScreen(
-    apps: List<LauncherApp>, accent: Color, columns: Int, clockSize: Int,
-    onOpenDrawer: () -> Unit, onOpenEditor: () -> Unit, onLaunch: (LauncherApp) -> Unit
+private fun HomePage(
+    apps: List<LauncherApp>,
+    accent: Color,
+    columns: Int,
+    iconSize: Int,
+    clockSize: Int,
+    showLabels: Boolean,
+    onOpenDrawer: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onLaunch: (LauncherApp) -> Unit
 ) {
-    val time = remember { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
-    val date = remember { SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date()) }
-    val favorites = apps.take(8)
-    val dock = apps.takeLast(4)
+    var currentTime by remember { mutableStateOf(Date()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            currentTime = Date()
+            delay(1000)
+        }
+    }
+    val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(currentTime)
+    val date = SimpleDateFormat("EEEE, d MMMM", Locale.getDefault())
+        .format(currentTime).replaceFirstChar { it.uppercase() }
+    val featured = apps.take(8)
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 22.dp),
+        Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            IconButton(onClick = onOpenEditor) {
-                Icon(Icons.Rounded.Edit, contentDescription = "Настроить рабочий стол", tint = MainText)
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Rounded.Settings, contentDescription = "Настройки", tint = TextPrimary)
             }
         }
-        Spacer(Modifier.height(24.dp))
-        Text(time, color = MainText, fontSize = clockSize.sp, fontWeight = FontWeight.Light, letterSpacing = 1.sp)
-        Text(date.replaceFirstChar { it.uppercase() }, color = SecondaryText, fontSize = 14.sp, letterSpacing = 1.2.sp)
-        Spacer(Modifier.height(34.dp))
+
+        Spacer(Modifier.height(20.dp))
+        Text(
+            time,
+            color = TextPrimary,
+            fontSize = clockSize.sp,
+            fontWeight = FontWeight.Light,
+            letterSpacing = 1.5.sp
+        )
+        Text(date, color = TextSecondary, fontSize = 14.sp, letterSpacing = 1.sp)
+        Spacer(Modifier.height(30.dp))
 
         Row(
-            Modifier.fillMaxWidth().height(166.dp),
+            Modifier.fillMaxWidth().height(156.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Column(
                 Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(26.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFF123B65), Color(0xFF07152C))))
+                    .background(Brush.linearGradient(listOf(Color(0xFF173F69), Color(0xFF09172C))))
                     .padding(16.dp),
                 verticalArrangement = Arrangement.Bottom
             ) {
-                Text("YOUR SPACE", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text("MY HOME", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Spacer(Modifier.height(6.dp))
-                Text("Make it\nyours.", color = MainText, fontSize = 24.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold)
+                Text("Your space.\nYour rules.", color = TextPrimary, fontSize = 23.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold)
             }
             Column(
                 Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(26.dp))
-                    .background(Panel).padding(10.dp),
+                    .background(PanelColor).padding(10.dp),
                 verticalArrangement = Arrangement.SpaceEvenly
             ) {
-                Text("FAVOURITES", color = SecondaryText, fontSize = 9.sp, letterSpacing = 1.5.sp)
-                val miniApps = favorites.take(6)
-                miniApps.chunked(3).forEach { rowApps ->
+                Text("FREQUENT", color = TextSecondary, fontSize = 9.sp, letterSpacing = 1.5.sp)
+                featured.take(6).chunked(3).forEach { rowApps ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        rowApps.forEach { app -> MiniAppIcon(app, accent) { onLaunch(app) } }
+                        rowApps.forEach { app -> CompactAppIcon(app, accent) { onLaunch(app) } }
                     }
                 }
             }
         }
 
-        Spacer(Modifier.height(22.dp))
+        Spacer(Modifier.height(24.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Приложения", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onOpenDrawer) {
+                Text("Все", color = accent)
+                Icon(Icons.Rounded.Apps, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+            }
+        }
         LazyVerticalGrid(
             columns = GridCells.Fixed(columns),
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(favorites, key = { it.packageName }) { app -> AppTile(app, accent) { onLaunch(app) } }
+            items(featured, key = { it.packageName }) { app ->
+                AppIconItem(app, accent, iconSize, showLabels) { onLaunch(app) }
+            }
         }
-
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Panel).padding(vertical = 10.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(25.dp))
+                .background(PanelColor).padding(horizontal = 12.dp, vertical = 9.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            dock.forEach { app -> MiniAppIcon(app, accent) { onLaunch(app) } }
+            apps.takeLast(4).forEach { app -> CompactAppIcon(app, accent) { onLaunch(app) } }
             Box(
-                Modifier.size(48.dp).clip(RoundedCornerShape(16.dp)).background(accent.copy(alpha = .18f))
-                    .clickable(onClick = onOpenDrawer),
+                Modifier.size(44.dp).clip(RoundedCornerShape(15.dp))
+                    .background(accent.copy(alpha = .18f)).clickable(onClick = onOpenDrawer),
                 contentAlignment = Alignment.Center
-            ) { Icon(Icons.Rounded.Apps, contentDescription = "Все приложения", tint = accent) }
+            ) {
+                Icon(Icons.Rounded.Apps, contentDescription = "Все приложения", tint = accent)
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        Text("Проведи вверх · Настройка рабочего стола — карандаш", color = SecondaryText, fontSize = 10.sp)
     }
 }
 
 @Composable
-private fun MiniAppIcon(app: LauncherApp, accent: Color, onClick: () -> Unit) {
-    val bitmap = remember(app.packageName) { runCatching { app.icon.toBitmap(112, 112).asImageBitmap() }.getOrNull() }
-    Box(
-        Modifier.size(42.dp).clip(RoundedCornerShape(14.dp)).background(Color(0x99030A16))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        if (bitmap != null) Image(bitmap, contentDescription = app.label, modifier = Modifier.size(27.dp))
-        else Text(app.label.take(1), color = accent, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun AppTile(app: LauncherApp, accent: Color, onClick: () -> Unit) {
-    val bitmap = remember(app.packageName) { runCatching { app.icon.toBitmap(144, 144).asImageBitmap() }.getOrNull() }
-    Column(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            Modifier.size(58.dp).clip(RoundedCornerShape(19.dp)).background(Color(0xAA101C30)),
-            contentAlignment = Alignment.Center
-        ) {
-            if (bitmap != null) Image(bitmap, contentDescription = app.label, modifier = Modifier.size(42.dp))
-            else Text(app.label.take(1), color = accent, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(app.label, color = MainText, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-    }
-}
-
-@Composable
-private fun AppDrawer(
-    apps: List<LauncherApp>, search: String, accent: Color,
-    onSearchChange: (String) -> Unit, onBack: () -> Unit, onLaunch: (LauncherApp) -> Unit
+private fun ApplicationDrawer(
+    apps: List<LauncherApp>,
+    searchText: String,
+    selectedCategory: AppCategory?,
+    accent: Color,
+    onSearchChange: (String) -> Unit,
+    onCategoryChange: (AppCategory?) -> Unit,
+    onBack: () -> Unit,
+    onLaunch: (LauncherApp) -> Unit
 ) {
-    val filtered = remember(apps, search) { apps.filter { it.label.contains(search.trim(), ignoreCase = true) } }
-    Column(Modifier.fillMaxSize().background(Color(0xF5061022)).padding(horizontal = 18.dp, vertical = 22.dp)) {
+    val filteredApps = apps.filter { app ->
+        (selectedCategory == null || app.category == selectedCategory) &&
+            app.title.contains(searchText.trim(), ignoreCase = true)
+    }
+
+    Column(
+        Modifier.fillMaxSize().background(Color(0xF5071224)).padding(horizontal = 18.dp, vertical = 16.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Rounded.ArrowBack, contentDescription = "Назад", tint = MainText) }
-            Text("Приложения", color = MainText, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Rounded.ArrowBack, contentDescription = "Назад", tint = TextPrimary)
+            }
+            Text("Приложения", color = TextPrimary, fontSize = 23.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(12.dp))
         TextField(
-            value = search, onValueChange = onSearchChange, modifier = Modifier.fillMaxWidth(), singleLine = true,
-            placeholder = { Text("Поиск приложений", color = SecondaryText) },
+            value = searchText,
+            onValueChange = onSearchChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            placeholder = { Text("Поиск приложений", color = TextSecondary) },
             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = accent) },
             shape = RoundedCornerShape(22.dp),
             colors = TextFieldDefaults.colors(
-                focusedContainerColor = Panel, unfocusedContainerColor = Panel,
-                focusedTextColor = MainText, unfocusedTextColor = MainText,
-                cursorColor = accent, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent
+                focusedContainerColor = PanelColor,
+                unfocusedContainerColor = PanelColor,
+                focusedTextColor = TextPrimary,
+                unfocusedTextColor = TextPrimary,
+                cursorColor = accent,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent
             )
         )
-        Spacer(Modifier.height(14.dp))
-        Text("${filtered.size} приложений", color = SecondaryText, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 76.dp), contentPadding = PaddingValues(bottom = 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(18.dp)
-        ) { items(filtered, key = { it.packageName }) { app -> AppTile(app, accent) { onLaunch(app) } } }
+        Spacer(Modifier.height(12.dp))
+        LazyColumn {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    CategoryChip("Все", selectedCategory == null, accent) { onCategoryChange(null) }
+                    AppCategory.values().forEach { category ->
+                        CategoryChip(category.title, selectedCategory == category, accent) {
+                            onCategoryChange(category)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("${filteredApps.size} приложений", color = TextSecondary, fontSize = 12.sp)
+                Spacer(Modifier.height(8.dp))
+            }
+            items(filteredApps.chunked(4)) { rowApps ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    rowApps.forEach { app ->
+                        Box(Modifier.weight(1f)) {
+                            AppIconItem(app, accent, 52, true) { onLaunch(app) }
+                        }
+                    }
+                    repeat(4 - rowApps.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun EditorDialog(
-    accentIndex: Int, columns: Int, clockSize: Int,
-    onAccent: (Int) -> Unit, onColumns: (Int) -> Unit, onClockSize: (Int) -> Unit, onClose: () -> Unit
+private fun CategoryChip(label: String, selected: Boolean, accent: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(CircleShape)
+            .background(if (selected) accent.copy(alpha = .25f) else PanelColor)
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Text(label, color = if (selected) accent else TextSecondary, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun CompactAppIcon(app: LauncherApp, accent: Color, onClick: () -> Unit) {
+    val bitmap = remember(app.packageName) {
+        runCatching { app.icon.toBitmap(112, 112).asImageBitmap() }.getOrNull()
+    }
+    Box(
+        Modifier.size(43.dp).clip(RoundedCornerShape(14.dp))
+            .background(Color(0x99030A16)).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) Image(bitmap, contentDescription = app.title, modifier = Modifier.size(29.dp))
+        else Text(app.title.take(1), color = accent, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun AppIconItem(
+    app: LauncherApp,
+    accent: Color,
+    iconSize: Int,
+    showLabel: Boolean,
+    onClick: () -> Unit
+) {
+    val bitmap = remember(app.packageName) {
+        runCatching { app.icon.toBitmap(144, 144).asImageBitmap() }.getOrNull()
+    }
+    Column(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier.size(iconSize.dp).clip(RoundedCornerShape(19.dp))
+                .background(Color(0xAA101C30)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (bitmap != null) Image(bitmap, contentDescription = app.title, modifier = Modifier.size((iconSize * .72f).dp))
+            else Text(app.title.take(1), color = accent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+        if (showLabel) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                app.title, color = TextPrimary, fontSize = 10.sp, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+private fun LauncherSettingsDialog(
+    accentIndex: Int,
+    columns: Int,
+    iconSize: Int,
+    clockSize: Int,
+    showLabels: Boolean,
+    onAccentChange: (Int) -> Unit,
+    onColumnsChange: (Int) -> Unit,
+    onIconSizeChange: (Int) -> Unit,
+    onClockSizeChange: (Int) -> Unit,
+    onLabelsChange: (Boolean) -> Unit,
+    onDismiss: () -> Unit
 ) {
     AlertDialog(
-        onDismissRequest = onClose,
+        onDismissRequest = onDismiss,
         containerColor = Color(0xFF15243A),
-        title = { Text("Настройка рабочего стола", color = MainText, fontWeight = FontWeight.SemiBold) },
+        title = { Text("Настройка рабочего стола", color = TextPrimary) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Цвет акцента", color = SecondaryText, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    AccentOptions.forEachIndexed { index, color ->
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Цветовая тема", color = TextSecondary, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AccentColors.forEachIndexed { index, color ->
                         Box(
-                            Modifier.size(34.dp).clip(CircleShape).background(color)
-                                .clickable { onAccent(index) },
+                            Modifier.size(32.dp).clip(CircleShape).background(color).clickable { onAccentChange(index) },
                             contentAlignment = Alignment.Center
                         ) {
-                            if (index == accentIndex) Text("✓", color = Color(0xFF071329), fontWeight = FontWeight.Bold)
+                            if (accentIndex == index) Text("✓", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
-                Text("Иконок в строке: $columns", color = SecondaryText, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    (3..5).forEach { value ->
-                        TextButton(onClick = { onColumns(value) }) {
-                            Text("$value", color = if (columns == value) AccentOptions[accentIndex] else MainText)
+                Text("Колонки: $columns", color = TextSecondary, fontSize = 13.sp)
+                Row {
+                    (3..6).forEach { value ->
+                        TextButton(onClick = { onColumnsChange(value) }) {
+                            Text("$value", color = if (columns == value) AccentColors[accentIndex] else TextPrimary)
                         }
                     }
                 }
-                Text("Размер часов: $clockSize", color = SecondaryText, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(48, 58, 68, 76).forEach { value ->
-                        TextButton(onClick = { onClockSize(value) }) {
-                            Text(" ${value} ", color = if (clockSize == value) AccentOptions[accentIndex] else MainText)
+                Text("Размер иконок: $iconSize", color = TextSecondary, fontSize = 13.sp)
+                Row {
+                    listOf(48, 56, 64, 72).forEach { value ->
+                        TextButton(onClick = { onIconSizeChange(value) }) {
+                            Text("$value", color = if (iconSize == value) AccentColors[accentIndex] else TextPrimary)
                         }
                     }
+                }
+                Text("Размер часов: $clockSize", color = TextSecondary, fontSize = 13.sp)
+                Row {
+                    listOf(42, 54, 66, 78).forEach { value ->
+                        TextButton(onClick = { onClockSizeChange(value) }) {
+                            Text("$value", color = if (clockSize == value) AccentColors[accentIndex] else TextPrimary)
+                        }
+                    }
+                }
+                TextButton(onClick = { onLabelsChange(!showLabels) }) {
+                    Text(if (showLabels) "Скрыть подписи приложений" else "Показать подписи приложений", color = AccentColors[accentIndex])
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onClose) { Text("Готово", color = AccentOptions[accentIndex]) } }
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Готово", color = AccentColors[accentIndex]) }
+        }
     )
 }
 
-private fun loadLaunchableApps(context: Context): List<LauncherApp> {
-    val pm = context.packageManager
-    return pm.getInstalledApplications(0).asSequence()
-        .filter { it.packageName != context.packageName }
-        .mapNotNull { info: ApplicationInfo ->
-            if (pm.getLaunchIntentForPackage(info.packageName) == null) return@mapNotNull null
-            LauncherApp(pm.getApplicationLabel(info).toString(), info.packageName, pm.getApplicationIcon(info))
-        }
-        .sortedBy { it.label.lowercase(Locale.getDefault()) }.toList()
-}
-
-private fun launchApp(context: Context, app: LauncherApp) {
+private fun launchApp(context: android.content.Context, app: LauncherApp) {
     val intent: Intent = context.packageManager.getLaunchIntentForPackage(app.packageName) ?: return
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }
